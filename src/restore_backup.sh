@@ -51,6 +51,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-./backup-restore-$STAMP}"
 STAGING="$OUTPUT_DIR/staging"
 LOG="$OUTPUT_DIR/restore.log"
 VERIFY="$OUTPUT_DIR/verification.txt"
+MEMBERS="$OUTPUT_DIR/archive-members.txt"
 mkdir -p "$OUTPUT_DIR"
 : > "$LOG"
 
@@ -72,6 +73,16 @@ archive_type() {
     *) echo unknown ;;
   esac
 }
+list_archive() {
+  local type="$1"
+  case "$type" in
+    tar) tar -tf "$BACKUP" ;;
+    targz) tar -tzf "$BACKUP" ;;
+    tarxz) tar -tJf "$BACKUP" ;;
+    zip) command -v unzip >/dev/null 2>&1 && unzip -Z1 "$BACKUP" ;;
+    *) return 1 ;;
+  esac
+}
 verify_archive() {
   local type="$1"
   case "$type" in
@@ -85,9 +96,9 @@ verify_archive() {
 extract_archive() {
   local type="$1"
   case "$type" in
-    tar) tar -xf "$BACKUP" -C "$STAGING" ;;
-    targz) tar -xzf "$BACKUP" -C "$STAGING" ;;
-    tarxz) tar -xJf "$BACKUP" -C "$STAGING" ;;
+    tar) tar --no-same-owner -xf "$BACKUP" -C "$STAGING" ;;
+    targz) tar --no-same-owner -xzf "$BACKUP" -C "$STAGING" ;;
+    tarxz) tar --no-same-owner -xJf "$BACKUP" -C "$STAGING" ;;
     zip) unzip -q "$BACKUP" -d "$STAGING" ;;
     *) return 1 ;;
   esac
@@ -107,18 +118,28 @@ if ! verify_archive "$TYPE"; then
   exit 20
 fi
 
+if ! list_archive "$TYPE" > "$MEMBERS"; then
+  log "Unable to list archive members. No restore was attempted."
+  exit 20
+fi
+if grep -Eq '(^/|(^|/)\.\.(/|$))' "$MEMBERS"; then
+  log "Archive contains an unsafe absolute or parent-directory path. No restore was attempted."
+  exit 20
+fi
+
 {
   echo "Backup: $BACKUP"
   echo "Archive type: $TYPE"
   echo "SHA-256: $ACTUAL_SHA256"
   echo "Destination: $DESTINATION"
   echo "Backup size: $(du -h "$BACKUP" | awk '{print $1}')"
+  echo "Archive members: $(wc -l < "$MEMBERS" | tr -d ' ')"
 } > "$VERIFY"
 
 confirm "Restore the verified archive into the empty destination $DESTINATION?" || { log "Restore cancelled."; exit 10; }
 
 if $DRY_RUN; then
-  log "DRY-RUN: archive passed validation; restore would extract to staging and copy into $DESTINATION."
+  log "DRY-RUN: archive passed integrity, checksum and path-safety validation."
   exit 0
 fi
 
@@ -134,7 +155,7 @@ mkdir -p "$DESTINATION"
 if command -v rsync >/dev/null 2>&1; then
   run_action "Copying restored content without overwriting existing files" rsync -a --ignore-existing "$STAGING"/ "$DESTINATION"/ || true
 else
-  run_action "Copying restored content into destination" cp -a "$STAGING"/. "$DESTINATION"/ || true
+  run_action "Copying restored content without overwriting existing files" cp -an "$STAGING"/. "$DESTINATION"/ || true
 fi
 
 if [ "$FAILURES" -gt 0 ]; then exit 20; fi
