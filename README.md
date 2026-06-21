@@ -1,25 +1,8 @@
 # Linux Backup and Recovery Validation Lab
 
-A safe Bash-based lab for validating backup artefacts, checksums, archive readability, retention, and controlled test restores.
+A Bash toolkit for validating backup artefacts and performing controlled, verified restores into an empty destination.
 
-## Purpose
-
-This project demonstrates that a backup is not considered successful until it can be verified and restored. It focuses on evidence, repeatability, and non-destructive testing.
-
-## Features
-
-- File existence, size, age, and ownership validation
-- SHA-256 checksum generation or comparison
-- TAR, TAR.GZ, TAR.XZ, and ZIP integrity testing
-- Optional isolated extraction into a newly created temporary directory
-- File-count and restored-size comparison
-- Retention-age evaluation
-- Text and JSON validation reports
-- Clear pass, warning, and failure results
-
-## Usage
-
-Validate an archive without extracting it:
+## Validate a backup
 
 ```bash
 chmod +x src/validate_backup.sh
@@ -35,20 +18,54 @@ Perform an isolated test restore:
 Compare against a known checksum:
 
 ```bash
-./src/validate_backup.sh --backup /path/to/backup.tar.gz --expected-sha256 HASH
+./src/validate_backup.sh \
+  --backup /path/to/backup.tar.gz \
+  --expected-sha256 HASH
 ```
+
+## Perform an actual verified restore
+
+Preview the restore plan:
+
+```bash
+chmod +x src/restore_backup.sh
+./src/restore_backup.sh \
+  --backup /path/to/backup.tar.gz \
+  --destination /srv/restore-test \
+  --dry-run
+```
+
+Restore into a new or empty destination:
+
+```bash
+./src/restore_backup.sh \
+  --backup /path/to/backup.tar.gz \
+  --destination /srv/restore-test
+```
+
+Include checksum verification:
+
+```bash
+./src/restore_backup.sh \
+  --backup /path/to/backup.tar.gz \
+  --destination /srv/restore-test \
+  --expected-sha256 HASH
+```
+
+## What the restore workflow does
+
+- Validates TAR, TAR.GZ, TAR.XZ and ZIP archive integrity before extraction.
+- Optionally verifies an expected SHA-256 checksum.
+- Extracts into an isolated staging directory first.
+- Refuses dangerous system destinations.
+- Requires the destination to be absent or empty.
+- Never overwrites existing files.
+- Records checksum, restored file count, restored size and destination verification.
+- Supports dry-run, confirmation prompts, logs and clear exit codes.
 
 ## Safety
 
-Test restores are written only to a newly created directory beneath the selected output folder. Existing production data is never overwritten. The script does not delete backups or alter source data.
-
-## Validation scenarios
-
-- Healthy archive with matching checksum
-- Corrupt archive
-- Backup older than the retention threshold
-- Archive containing nested paths
-- Insufficient free space for extraction
+Existing production data is never deleted or overwritten. The destination must be new or empty. The restore workflow is suitable for controlled recovery tests and technician-managed restores where the destination is explicitly selected.
 
 ## Author
 
